@@ -89,7 +89,7 @@ Swagger UI: http://localhost:8081/swagger-ui/index.html
 
 7. **Проверьте ClickHouse:**
    - Откройте http://localhost:8123/play
-   - Выполните: `SELECT * FROM `агрегаты_событий_заказов`;`
+   - Выполните: `SELECT * FROM `агрегаты_событий_заказов` ORDER BY `дата_и_время_записи` DESC;`
 
 ## Статус проверки
 
