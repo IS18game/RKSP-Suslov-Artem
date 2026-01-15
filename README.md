@@ -57,7 +57,6 @@ Swagger UI: http://localhost:8081/swagger-ui/index.html
 2. **Отправьте тестовое событие:**
    - Откройте http://localhost:8080/swagger-ui/index.html
    - POST `/api/v1/events` → Try it out
-   - Вставьте правильный JSON (обратите внимание на имена полей):
    ```json
    {
      "идентификатор": "test-001",
