@@ -31,32 +31,28 @@ public class EventProcessorService {
 
     private final RestTemplate restTemplate = new RestTemplate();
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter CLICKHOUSE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @PostConstruct
     public void initClickHouseTable() {
         try {
-            String createTableSql = "CREATE TABLE IF NOT EXISTS `агрегаты_событий_заказов` (" +
-                    "`дата_и_время_записи` DateTime, " +
-                    "`количество_записей` UInt64" +
-                    ") ENGINE = MergeTree() ORDER BY `дата_и_время_записи`";
+            String baseUrl = "http://localhost:8123";
+            String checkTableSql = "EXISTS TABLE `агрегаты_событий_заказов`";
+            String encodedCheck = URLEncoder.encode(checkTableSql, StandardCharsets.UTF_8);
             
-            String baseUrl = clickHouseUrl.replace("jdbc:clickhouse://", "http://")
-                    .replace("/default", "")
-                    .replace("?use_server_time_zone=false", "");
+            try {
+                String response = restTemplate.getForObject(baseUrl + "/?query=" + encodedCheck, String.class);
+                if (response != null && response.trim().equals("1")) {
+                    System.out.println("Таблица агрегаты_событий_заказов уже существует в ClickHouse");
+                    return;
+                }
+            } catch (Exception e) {
+            }
             
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.TEXT_PLAIN);
-            
-            HttpEntity<String> request = new HttpEntity<>(createTableSql, headers);
-            ResponseEntity<String> response = restTemplate.postForEntity(
-                    baseUrl + "/?query=" + URLEncoder.encode(createTableSql, StandardCharsets.UTF_8), 
-                    null, 
-                    String.class);
-            
-            System.out.println("Таблица агрегаты_событий_заказов создана/проверена в ClickHouse");
+            System.out.println("Таблица агрегаты_событий_заказов должна быть создана вручную через http://localhost:8123/play");
+            System.out.println("Используйте SQL: CREATE TABLE IF NOT EXISTS `агрегаты_событий_заказов` (`дата_и_время_записи` DateTime, `количество_записей` UInt64) ENGINE = MergeTree() ORDER BY `дата_и_время_записи`");
         } catch (Exception e) {
-            System.err.println("Ошибка при создании таблицы в ClickHouse: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("Ошибка при проверке таблицы в ClickHouse: " + e.getMessage());
         }
     }
 
@@ -96,20 +92,49 @@ public class EventProcessorService {
     }
 
     public void saveCountToClickHouse(long count) {
+        String sql = null;
         try {
-            String now = LocalDateTime.now().format(FORMATTER);
-            String sql = String.format("INSERT INTO `агрегаты_событий_заказов` (`дата_и_время_записи`, `количество_записей`) VALUES ('%s', %d)", 
+            String now = LocalDateTime.now().format(CLICKHOUSE_FORMATTER);
+            sql = String.format("INSERT INTO `агрегаты_событий_заказов` (`дата_и_время_записи`, `количество_записей`) VALUES ('%s', %d)", 
                     now, count);
             
-            String baseUrl = clickHouseUrl.replace("jdbc:clickhouse://", "http://")
-                    .replace("/default", "")
-                    .replace("?use_server_time_zone=false", "");
+            String baseUrl = "http://localhost:8123";
             String encodedQuery = URLEncoder.encode(sql, StandardCharsets.UTF_8);
+            String fullUrl = baseUrl + "/?query=" + encodedQuery;
             
-            restTemplate.postForObject(baseUrl + "/?query=" + encodedQuery, null, String.class);
-            System.out.println("Количество записей (" + count + ") сохранено в ClickHouse");
+            System.out.println("=== Сохранение в ClickHouse ===");
+            System.out.println("Количество записей: " + count);
+            System.out.println("SQL: " + sql);
+            System.out.println("URL: " + fullUrl);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Content-Type", "text/plain; charset=utf-8");
+            HttpEntity<String> request = new HttpEntity<>(sql, headers);
+            
+            ResponseEntity<String> response = restTemplate.postForEntity(baseUrl + "/", request, String.class);
+            System.out.println("Статус ответа: " + response.getStatusCode());
+            String responseBody = response.getBody();
+            System.out.println("Тело ответа: " + (responseBody != null ? responseBody : "(пусто)"));
+            
+            if (response.getStatusCode().is2xxSuccessful()) {
+                if (responseBody == null || responseBody.isEmpty() || responseBody.trim().equals("")) {
+                    System.out.println("✓ Количество записей (" + count + ") успешно сохранено в ClickHouse");
+                } else if (responseBody.contains("Exception") || responseBody.contains("Error") || responseBody.contains("Code:")) {
+                    System.err.println("✗ ClickHouse вернул ошибку: " + responseBody);
+                } else {
+                    System.out.println("✓ Количество записей (" + count + ") успешно сохранено в ClickHouse");
+                }
+            } else {
+                System.err.println("✗ Неожиданный статус ответа от ClickHouse: " + response.getStatusCode());
+                System.err.println("Тело ответа: " + responseBody);
+            }
         } catch (Exception e) {
-            System.err.println("Ошибка при сохранении в ClickHouse: " + e.getMessage());
+            System.err.println("✗ ОШИБКА при сохранении в ClickHouse!");
+            System.err.println("Тип ошибки: " + e.getClass().getName());
+            System.err.println("Сообщение: " + e.getMessage());
+            if (sql != null) {
+                System.err.println("SQL запрос: " + sql);
+            }
             e.printStackTrace();
         }
     }
